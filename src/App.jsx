@@ -10,7 +10,7 @@ export default function App(){
  const initialAdminRequest=
   new URLSearchParams(window.location.search).get('tab')==='admin';
 
- const [session,setSession]=useState(null);
+ const [session,setSession]=useState(undefined);
  const [profile,setProfile]=useState(null);
  const [isAdmin,setIsAdmin]=useState(false);
 
@@ -41,7 +41,7 @@ export default function App(){
  useEffect(()=>{
   const url=new URL(window.location.href);
 
-  if(adminRequested && (tab==='admin'||tab==='auth')){
+  if(adminRequested){
    url.searchParams.set('tab','admin');
   }else{
    url.searchParams.delete('tab');
@@ -50,17 +50,22 @@ export default function App(){
   window.history.replaceState({},'',url);
  },[tab,adminRequested]);
 
- // Supabase connection and session
+ // Supabase session
  useEffect(()=>{
   if(!supabaseReady){
    setLoading(false);
    return;
   }
 
+  let mounted=true;
+
   supabase.auth.getSession().then(({data,error})=>{
+   if(!mounted)return;
+
    if(error){
     setNotice(error.message);
    }
+
    setSession(data?.session||null);
   });
 
@@ -69,45 +74,69 @@ export default function App(){
     setSession(newSession);
    });
 
-  return ()=>subscription.unsubscribe();
+  return ()=>{
+   mounted=false;
+   subscription.unsubscribe();
+  };
  },[]);
 
- // Load user profile and admin permission
+ // Load account and check Admin role
  useEffect(()=>{
-  if(!supabaseReady)return;
+  if(!supabaseReady||session===undefined)return;
 
   let cancelled=false;
 
   async function loadAccount(){
 
+   setLoading(true);
+
    if(session?.user){
 
-    const {data:profileData}=await supabase
+    // Read the user's profile
+    const {data:profileData,error:profileError}=await supabase
      .from('profiles')
      .select('*')
      .eq('id',session.user.id)
      .maybeSingle();
 
+    // Check role directly from profiles table
+    let adminStatus=profileData?.role==='admin';
+
+    // Also check existing is_admin() function
     const {data:adminData,error:adminError}=
      await supabase.rpc('is_admin');
+
+    if(!adminError&&adminData===true){
+     adminStatus=true;
+    }
 
     if(cancelled)return;
 
     setProfile(profileData||session.user.user_metadata||null);
-    setIsAdmin(!adminError&&Boolean(adminData));
+    setIsAdmin(adminStatus);
 
-    // Admin login হলে Dashboard-এ ফিরে যাবে
-    if(adminRequested){
+    if(adminRequested&&adminStatus){
      setTab('admin');
     }
 
+    if(adminRequested&&!adminStatus){
+     setNotice(
+      profileError
+       ?'প্রোফাইল যাচাই করা যায়নি: '+profileError.message
+       :'এই অ্যাকাউন্টটি Admin নয়। Admin ইমেইল দিয়ে লগইন করুন।'
+     );
+    }
+
    }else{
+
     setProfile(null);
     setIsAdmin(false);
+
    }
 
+   await loadVideos();
+
    if(!cancelled){
-    await loadVideos();
     setLoading(false);
    }
   }
@@ -117,7 +146,7 @@ export default function App(){
   return ()=>{
    cancelled=true;
   };
- },[session]);
+ },[session,adminRequested]);
 
  // Load published videos
  async function loadVideos(){
@@ -147,45 +176,67 @@ export default function App(){
 
   let result;
 
-  if(authMode==='signup'){
+  try{
 
-   result=await supabase.auth.signUp({
-    email,
-    password,
-    options:{
-     data:{full_name:fullName}
-    }
-   });
+   if(authMode==='signup'){
 
-  }else{
+    result=await supabase.auth.signUp({
+     email:email.trim(),
+     password,
+     options:{
+      data:{full_name:fullName}
+     }
+    });
 
-   result=await supabase.auth.signInWithPassword({
-    email,
-    password
-   });
-
-  }
-
-  setBusy(false);
-
-  if(result.error){
-
-   setNotice('অ্যাকাউন্ট সমস্যা: '+result.error.message);
-
-  }else if(authMode==='signup'){
-
-   setNotice('অ্যাকাউন্ট তৈরি হয়েছে। ইমেইল যাচাই করুন।');
-
-  }else{
-
-   setNotice('লগইন সফল হয়েছে।');
-
-   if(adminRequested){
-    setTab('admin');
    }else{
-    setTab('home');
+
+    result=await supabase.auth.signInWithPassword({
+     email:email.trim(),
+     password
+    });
+
    }
 
+   setBusy(false);
+
+   if(result.error){
+    setNotice('অ্যাকাউন্ট সমস্যা: '+result.error.message);
+    return;
+   }
+
+   if(authMode==='signup'){
+
+    setNotice('অ্যাকাউন্ট তৈরি হয়েছে। ইমেইল যাচাই করুন।');
+
+   }else{
+
+    setNotice('লগইন সফল হয়েছে। অ্যাকাউন্ট যাচাই হচ্ছে...');
+
+    setAdminRequested(true);
+    setTab('admin');
+
+   }
+
+  }catch(error){
+
+   setBusy(false);
+   setNotice('সমস্যা হয়েছে: '+error.message);
+
+  }
+ }
+
+ // Logout
+ async function logout(){
+
+  const {error}=await supabase.auth.signOut();
+
+  if(error){
+   setNotice('লগআউট হয়নি: '+error.message);
+  }else{
+   setSession(null);
+   setIsAdmin(false);
+   setProfile(null);
+   setNotice('লগআউট সফল হয়েছে।');
   }
  }
 
@@ -212,7 +263,6 @@ export default function App(){
   const path=
    `${session.user.id}/${Date.now()}-${safeName}`;
 
-  // Upload to Supabase Storage
   const up=await supabase.storage
    .from(VIDEO_BUCKET)
    .upload(path,file,{upsert:false});
@@ -225,8 +275,7 @@ export default function App(){
 
   }
 
-  // Insert into videos table
-  // .select().single() ইচ্ছাকৃতভাবে বাদ রাখা হয়েছে
+  // Keep insert without select().single()
   const ins=await supabase
    .from('videos')
    .insert({
@@ -284,7 +333,7 @@ export default function App(){
   setDetails('');
  }
 
- // Admin video publish/unpublish
+ // Admin publish/unpublish
  async function adminPublish(video,published){
 
   if(!isAdmin){
@@ -433,7 +482,7 @@ export default function App(){
     </div>
 
     {session?
-     <button onClick={()=>supabase.auth.signOut()}>
+     <button onClick={logout}>
       <LogOut size={17}/> লগআউট
      </button>
      :
@@ -490,6 +539,7 @@ export default function App(){
     <div
      className="notice"
      onClick={()=>setNotice('')}
+     role="button"
     >
      {notice}
      <button>×</button>
@@ -788,28 +838,80 @@ export default function App(){
      sub="ভিডিও মডারেশন ও অনুমোদন"
     />
 
-    {!session?
+    {!session||!isAdmin?
 
-     <LoginPrompt
-      onClick={()=>setTab('auth')}
-     />
+     <div className="auth-card admin-login-card">
+
+      <div className="brand-mark">
+       <Shield/>
+      </div>
+
+      <h2>Admin Login</h2>
+
+      <p>
+       Admin ইমেইল ও পাসওয়ার্ড দিয়ে লগইন করুন।
+      </p>
+
+      <form onSubmit={authSubmit}>
+
+       <input
+        type="email"
+        required
+        placeholder="Admin ইমেইল"
+        value={email}
+        onChange={e=>setEmail(e.target.value)}
+       />
+
+       <input
+        type="password"
+        required
+        minLength="6"
+        placeholder="পাসওয়ার্ড"
+        value={password}
+        onChange={e=>setPassword(e.target.value)}
+       />
+
+       <button
+        className="primary"
+        disabled={busy}
+       >
+        {busy?'লগইন হচ্ছে...':'Admin হিসেবে লগইন করুন'}
+       </button>
+
+      </form>
+
+      {session&&
+       <button
+        className="text-btn"
+        onClick={logout}
+       >
+        অন্য অ্যাকাউন্ট দিয়ে লগইন করতে লগআউট করুন
+       </button>
+      }
+
+      {!session&&
+       <button
+        className="text-btn"
+        onClick={()=>setTab('auth')}
+       >
+        সাধারণ সদস্য লগইন
+       </button>
+      }
+
+     </div>
 
      :
 
-     isAdmin?
+     <div className="panel">
 
-      <div className="panel">
+      <div className="admin-heading">
        <h3>ভিডিও অনুমোদন</h3>
-       <AdminVideos onPublish={adminPublish}/>
+       <span className="status">Admin</span>
       </div>
 
-      :
+      <AdminVideos onPublish={adminPublish}/>
 
-      <div className="empty">
-       <Shield/>
-       <b>এই অ্যাকাউন্টটি Admin নয়।</b>
-       <span>অনুমোদিত Admin অ্যাকাউন্ট দিয়ে লগইন করুন।</span>
-      </div>
+     </div>
 
     }
 
@@ -1113,4 +1215,4 @@ function Reports(){
 
   <p>কোনো রিপোর্ট নেই বা রিপোর্ট পড়ার অনুমতি নেই।</p>;
 
-    }
+ }
