@@ -1,3 +1,4 @@
+import FriendsChat from './FriendsChat';
 import React, {useEffect,useMemo,useState} from 'react';
 import {supabase,supabaseReady,VIDEO_BUCKET} from './supabase';
 import {
@@ -399,12 +400,17 @@ export default function App(){
 
  const nav=[
   ['home','হোম',Home],
+  ['friends','বন্ধু ও ইনবক্স',Users],
   ['videos','ভিডিও গ্রুপ',Video],
   ['upload','ভিডিও আপলোড',Upload],
   ['myvideos','আমার ভিডিও',Users],
   ['membership','মেম্বারশিপ',Shield],
-  ...(isAdmin?[['admin','অ্যাডমিন ড্যাশবোর্ড',Settings],['reports','রিপোর্ট',Flag]]:[])
- ];
+  ...(isAdmin?[
+    ['admin','অ্যাডমিন ড্যাশবোর্ড',Settings],
+    ['reports','রিপোর্ট',Flag]
+  ]:[])
+];
+
 
  const filtered=useMemo(()=>videos.filter(v=>
   (v.title+' '+(v.description||'')).toLowerCase().includes(query.toLowerCase())
