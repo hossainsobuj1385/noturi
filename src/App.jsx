@@ -1,5 +1,5 @@
-import FriendsChat from './FriendsChat';
 import React, {useEffect,useMemo,useState} from 'react';
+import FriendsChat from './FriendsChat';
 import {supabase,supabaseReady,VIDEO_BUCKET} from './supabase';
 import {
  Play,Search,LogIn,LogOut,Upload,Shield,Home,Users,
@@ -409,8 +409,7 @@ export default function App(){
     ['admin','অ্যাডমিন ড্যাশবোর্ড',Settings],
     ['reports','রিপোর্ট',Flag]
   ]:[])
-];
-
+ ];
 
  const filtered=useMemo(()=>videos.filter(v=>
   (v.title+' '+(v.description||'')).toLowerCase().includes(query.toLowerCase())
@@ -517,6 +516,9 @@ export default function App(){
 
     <VideoGrid items={filtered.slice(0,6)} urls={videoUrls} onReport={setReportVideo} session={session}/>
    </>}
+
+   {/* বন্ধু ও ইনবক্স পেজ */}
+   {tab==='friends'&&<FriendsChat/>}
 
    {tab==='videos'&&<>
     <Section title="ভিডিও গ্রুপ" sub="কমিউনিটির সব প্রকাশিত ভিডিও"/>
@@ -810,4 +812,4 @@ function Reports(){
    </div>
   )
   :<p>কোনো রিপোর্ট নেই বা রিপোর্ট পড়ার অনুমতি নেই।</p>;
-  }
+    }
